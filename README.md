@@ -50,6 +50,21 @@ Legg inn nøklene i GitHub-repoet under **Settings → Secrets and variables →
 
 Start deretter første kjøring: **Actions → Thailand-agent → Run workflow**.
 
+## Lenkene i rapporten
+
+Øverst i `RAPPORT.md` står hver reise på én linje med en direkte lenke:
+
+| Lenke | Hvor den går |
+|---|---|
+| **Åpne billetten** (Aviasales) | Den konkrete billetten, med 2 voksne utfylt. |
+| **Åpne tilbudet** (restplass) | Det konkrete restplass-tilbudet eller pakken hos turoperatøren eller samlesiden. |
+| **Åpne søket med disse datoene** (Google Flights) | Google Flights med rute og datoer utfylt. Den billigste flyvningen står øverst. Google Flights har ingen stabile lenker til én enkelt billett, så dette er det mest direkte som finnes. |
+| **Åpne siden** (restplass) | Tilbudet hadde ingen egen lenke på siden. Du må finne det i listen. Raden er merket «fant ingen egen lenke». |
+
+Lenkene til restplass-tilbudene hentes fra selve siden: agenten samler alle lenkene og teksten på
+kortet hver lenke står i, og Claude velger hvilken lenke som hører til hvert tilbud. Claude kan bare
+velge blant lenker som faktisk står på siden, så adressene blir aldri diktet opp.
+
 ## Slik virker den
 
 1. **Aviasales** hentes for hele perioden (8 kall, gratis). Det gir priser på mange datoer.

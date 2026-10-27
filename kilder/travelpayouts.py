@@ -8,6 +8,7 @@ hvilke datoer som er verdt å bekrefte i Google Flights.
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -74,6 +75,15 @@ def hent_demo(cfg: dict, sporring: dict, token: str) -> list[dict]:
             and r["return_at"].startswith(sporring["return_at"])]
 
 
+def lenke_for_voksne(lenke: str, voksne: int) -> str:
+    """Aviasales-lenken gjelder 1 voksen. Søkekoden slutter med antall voksne
+    (OSL2611BKK0912 + 1), så den byttes til riktig antall. Billett-id-en (?t=)
+    beholdes, slik at lenken fortsatt åpner akkurat denne billetten."""
+    if lenke.startswith("/"):
+        lenke = "https://www.aviasales.com" + lenke
+    return re.sub(r"(/search/[A-Z]{3}\d{4}[A-Z]{3}(?:\d{4})?)\d", rf"\g<1>{voksne}", lenke, count=1)
+
+
 def tolk(cfg: dict, rader: list[dict], gyldige: set[str], tidspunkt: str) -> dict[str, dict]:
     """Billigste tilbud per dato-kombinasjon som oppfyller kriteriene."""
     beste: dict[str, dict] = {}
@@ -88,9 +98,7 @@ def tolk(cfg: dict, rader: list[dict], gyldige: set[str], tidspunkt: str) -> dic
         stopp = max(r.get("transfers", 0) or 0, r.get("return_transfers", 0) or 0)
         if n not in gyldige or stopp > cfg["maks_stopp"]:
             continue
-        lenke = r.get("link") or ""
-        if lenke.startswith("/"):
-            lenke = "https://www.aviasales.com" + lenke
+        lenke = lenke_for_voksne(r.get("link") or "", cfg["voksne"])
         tilbud = {
             "kilde": "Aviasales",
             "type": "fly",
@@ -106,6 +114,7 @@ def tolk(cfg: dict, rader: list[dict], gyldige: set[str], tidspunkt: str) -> dic
             "bagasje": "ukjent",
             "pris_per_person_med_bag": med_bagasje(cfg, pris, "ukjent"),
             "lenke": lenke or "https://www.aviasales.com",
+            "lenke_type": "billett" if lenke else "oversiktsside",
             "sjekket": tidspunkt,
             "notat": "bufret pris, bekreft før bestilling",
         }

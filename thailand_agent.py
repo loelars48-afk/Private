@@ -106,7 +106,8 @@ def kjor_restplass(cfg, demo, funn, tilstand, idag, tidspunkt, logg) -> str:
         navn, url = side["navn"], side["url"]
         forrige = sidestatus.get(navn, {})
         try:
-            tekst = "Thailand Phuket demo" if demo else restplass.hent_sidetekst(url)
+            side_data = restplass.demo_side(url) if demo else restplass.hent_side(url)
+            tekst = side_data["tekst"]
         except Exception as e:
             sidestatus[navn] = {**forrige, "status": f"kunne ikke åpne siden ({str(e)[:120]})", "tidspunkt": tidspunkt}
             logg.append(f"{navn}: kunne ikke åpne siden ({str(e)[:120]})")
@@ -124,12 +125,13 @@ def kjor_restplass(cfg, demo, funn, tilstand, idag, tidspunkt, logg) -> str:
             ok += 1
             continue
         try:
-            rader = les(cfg, navn, url, tekst, idag)
+            lenker = restplass.relevante_lenker(side_data["lenker"])
+            rader = les(cfg, navn, url, tekst, lenker, idag)
         except Exception as e:
             sidestatus[navn] = {**forrige, "status": f"Claude-feil ({str(e)[:120]})", "tidspunkt": tidspunkt}
             logg.append(f"{navn}: Claude-feil ({str(e)[:120]})")
             continue
-        tilbud = restplass.tolk(cfg, navn, url, rader, tidspunkt)
+        tilbud = restplass.tolk(cfg, navn, url, rader, tidspunkt, lenker)
         funn["restplass"][navn] = tilbud
         sidestatus[navn] = {"hash": h, "status": f"{len(rader)} Thailand-tilbud, {len(tilbud)} passer kriteriene",
                             "tidspunkt": tidspunkt}
@@ -187,20 +189,56 @@ def bag_tekst(f: dict) -> str:
     return f"{kr(f['pris_per_person_med_bag'])} (est., ukjent)"
 
 
+LENKETEKST = {
+    "billett": ("Billett", "Åpne billetten"),
+    "tilbud": ("Tilbud", "Åpne tilbudet"),
+    "søk med datoer": ("Søk", "Åpne søket med disse datoene"),
+    "oversiktsside": ("Side", "Åpne siden (finn tilbudet i listen)"),
+}
+
+
+def lenke(f: dict, lang: bool = False) -> str:
+    kort, langt = LENKETEKST.get(f.get("lenke_type", "oversiktsside"), LENKETEKST["oversiktsside"])
+    return f"[{langt if lang else kort}]({f['lenke']})"
+
+
+def dato_tekst(f: dict) -> str:
+    if not (f["utreise"] and f["hjemreise"]):
+        return "dato ukjent"
+    ut, hjem = date.fromisoformat(f["utreise"]), date.fromisoformat(f["hjemreise"])
+    return f"{ut:%d.%m}–{hjem:%d.%m} ({f['netter']} netter)"
+
+
+def lenkeliste(rader: list[dict]) -> str:
+    """Én linje per reise med direkte lenke – hovedleveransen i rapporten."""
+    if not rader:
+        return "_Ingen._\n"
+    linjer = []
+    for f in rader:
+        detaljer = [f["til"], dato_tekst(f), f["type"]]
+        if f["flyselskap"]:
+            detaljer.append(f["flyselskap"])
+        if f["stopp"] not in ("", None):
+            detaljer.append("direkte" if f["stopp"] == 0 else f"{f['stopp']} stopp")
+        linjer.append(f"- **{kr(f['pris_per_person'])} p.p.** · " + " · ".join(str(d) for d in detaljer)
+                      + f" · {f['kilde']} → **{lenke(f, lang=True)}**")
+    return "\n".join(linjer) + "\n"
+
+
 def tabell(rader: list[dict]) -> str:
     if not rader:
         return "_Ingen._\n"
     linjer = [
-        "| Pris p.p. | Med innsj. bag p.p. | Kilde | Type | Utreise | Hjem | Netter | Til | Selskap | Stopp | Sjekket | | Merknad |",
-        "|---:|---:|---|---|---|---|---:|---|---|---|---|---|---|",
+        "| Lenke | Pris p.p. | Med innsj. bag p.p. | Kilde | Type | Utreise | Hjem | Netter | Til | Selskap | Stopp | Sjekket | Merknad |",
+        "|---|---:|---:|---|---|---|---|---:|---|---|---|---|---|",
     ]
     for f in rader:
         stopp = f"{f['stopp']}" + (f" ({f['via']})" if f.get("via") else "")
         linjer.append(
-            f"| **{kr(f['pris_per_person'])}** | {bag_tekst(f)} | {f['kilde']} | {f['type']} "
+            f"| {lenke(f)} | **{kr(f['pris_per_person'])}** | {bag_tekst(f)} | {f['kilde']} | {f['type']} "
             f"| {f['utreise'] or '?'} | {f['hjemreise'] or '?'} | {f['netter']} | {f['til']} "
             f"| {f['flyselskap']} | {stopp} | {f['sjekket'][:16].replace('T', ' ')} "
-            f"| [Se]({f['lenke']}) | {f.get('notat', '')} |"
+            f"| {f.get('notat', '')} |"
         )
     return "\n".join(linjer) + "\n"
 
@@ -215,6 +253,9 @@ def slaa_sammen_restplass(funn: dict) -> list[dict]:
             if k in unike:
                 if f["kilde"] not in unike[k]["kilde"]:
                     unike[k]["kilde"] += f", {f['kilde']}"
+                # Foretrekk en lenke til selve tilbudet framfor en oversiktsside
+                if unike[k].get("lenke_type") != "tilbud" and f.get("lenke_type") == "tilbud":
+                    unike[k]["lenke"], unike[k]["lenke_type"] = f["lenke"], "tilbud"
             else:
                 unike[k] = dict(f)
     return list(unike.values())
@@ -263,17 +304,25 @@ def lag_rapport(cfg, funn, kombinasjoner, tilstand, kildestatus, nå, logg) -> s
         "",
         f"## Treff (≤ {kr(maks)} per person)",
         "",
-        tabell(treff),
+        lenkeliste(treff),
         f"## Nesten-treff ({kr(maks + 1)}–{kr(maks + margin)} per person)",
         "",
-        tabell(nesten),
-        "## Restplass og charter",
+        lenkeliste(nesten),
+        "## Restplass og pakkereiser – direkte lenker",
+        "",
+        lenkeliste(restplass_alle[:20]),
+        "## Detaljer",
+        "",
+        "### Treff og nesten-treff",
+        "",
+        tabell(treff + nesten),
+        "### Restplass og charter",
         "",
         "Alle Thailand-tilbud fra restplass-sidene som passer reisevinduet, også uten oppgitt dato.",
         "Pakkereiser inkluderer hotell, så prisen er ikke direkte sammenlignbar med kun fly.",
         "",
         tabell(restplass_alle[:20]),
-        "## 10 billigste totalt (med dato)",
+        "### 10 billigste totalt (med dato)",
         "",
         tabell(datert[:10]),
         "## Kilder",
@@ -286,6 +335,10 @@ def lag_rapport(cfg, funn, kombinasjoner, tilstand, kildestatus, nå, logg) -> s
         "",
         "## Slik leser du rapporten",
         "",
+        "- **Lenkene:** «Billett» åpner den konkrete billetten hos Aviasales (for 2 voksne). «Tilbud» åpner "
+        "det konkrete restplass-tilbudet eller pakken hos turoperatøren/samlesiden. «Søk» åpner Google "
+        "Flights med rute og datoer ferdig utfylt – den billigste flyvningen står øverst. «Side» betyr at "
+        "tilbudet ikke hadde egen lenke, og at du må finne det i listen på siden.",
         "- **Pris p.p.** er pris per person slik kilden oppgir den.",
         "- **Google Flights** gir ferske priser. **Aviasales** gir bufrede priser fra de siste døgnene, "
         "som kan være borte. Agenten bekrefter billige Aviasales-datoer i Google Flights automatisk.",

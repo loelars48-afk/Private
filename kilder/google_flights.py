@@ -92,9 +92,17 @@ def bagasje_status(alternativ: dict) -> str:
     return "ukjent"
 
 
+def sok_lenke(cfg: dict, til: str, ut: date, hjem: date) -> str:
+    """Google Flights-søk for akkurat denne ruten og disse datoene."""
+    q = (f"Flights from {cfg['fra_flyplass']} to {til} on {ut.isoformat()} through {hjem.isoformat()} "
+         f"for {cfg['voksne']} adults")
+    return "https://www.google.com/travel/flights?" + urllib.parse.urlencode(
+        {"q": q, "curr": cfg["valuta"], "hl": "no", "gl": "no"})
+
+
 def tolk_resultat(cfg: dict, data: dict, ut: date, hjem: date, tidspunkt: str) -> list[dict]:
     """Gjør om SerpApi-svaret til en flat liste med reisealternativer."""
-    url = data.get("search_metadata", {}).get("google_flights_url") or "https://www.google.com/travel/flights"
+    sok_url = data.get("search_metadata", {}).get("google_flights_url")
     funn = []
     for gruppe in ("best_flights", "other_flights"):
         for alt in data.get(gruppe, []):
@@ -104,13 +112,14 @@ def tolk_resultat(cfg: dict, data: dict, ut: date, hjem: date, tidspunkt: str) -
                 continue
             per_person = pris / cfg["voksne"] if cfg["pris_fra_api_er_totalt_for_alle"] else pris
             bag = bagasje_status(alt)
+            til = segmenter[-1].get("arrival_airport", {}).get("id", "?")
             funn.append({
                 "kilde": "Google Flights",
                 "type": "fly",
                 "utreise": ut.isoformat(),
                 "hjemreise": hjem.isoformat(),
                 "netter": (hjem - ut).days,
-                "til": segmenter[-1].get("arrival_airport", {}).get("id", "?"),
+                "til": til,
                 "flyselskap": " / ".join(dict.fromkeys(s.get("airline", "?") for s in segmenter)),
                 "stopp": len(segmenter) - 1,
                 "via": ", ".join(l.get("id", "?") for l in alt.get("layovers", [])),
@@ -118,7 +127,8 @@ def tolk_resultat(cfg: dict, data: dict, ut: date, hjem: date, tidspunkt: str) -
                 "pris_per_person": round(per_person),
                 "bagasje": bag,
                 "pris_per_person_med_bag": med_bagasje(cfg, per_person, bag),
-                "lenke": url,
+                "lenke": sok_url or sok_lenke(cfg, til, ut, hjem),
+                "lenke_type": "søk med datoer",
                 "sjekket": tidspunkt,
                 "notat": "",
             })

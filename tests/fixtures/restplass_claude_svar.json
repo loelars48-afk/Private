@@ -1,17 +1,74 @@
-{"tilbud": [
-  {"destinasjon": "Phuket", "utreise": "2026-11-28", "hjemreise": null, "netter": 14, "pris_nok": 4995,
-   "pris_gjelder": "per_person", "antall_personer": null, "type": "kun_fly", "avreise_fra": "Oslo",
-   "turoperator": "Ving", "beskrivelse": "Flystol Phuket, 14 netter"},
-  {"destinasjon": "Krabi", "utreise": "2026-12-05", "hjemreise": "2026-12-19", "netter": 14, "pris_nok": 23980,
-   "pris_gjelder": "totalt", "antall_personer": 2, "type": "pakkereise", "avreise_fra": "Gardermoen",
-   "turoperator": "TUI", "beskrivelse": "Ao Nang, hotell med frokost"},
-  {"destinasjon": "Khao Lak", "utreise": null, "hjemreise": null, "netter": null, "pris_nok": 8990,
-   "pris_gjelder": "ukjent", "antall_personer": null, "type": "pakkereise", "avreise_fra": null,
-   "turoperator": "Apollo", "beskrivelse": "Fra-pris Khao Lak"},
-  {"destinasjon": "Phuket", "utreise": "2026-12-15", "hjemreise": "2026-12-29", "netter": 14, "pris_nok": 3990,
-   "pris_gjelder": "per_person", "antall_personer": null, "type": "kun_fly", "avreise_fra": "Oslo",
-   "turoperator": "Ving", "beskrivelse": "For sen hjemreise"},
-  {"destinasjon": "Phuket", "utreise": "2026-12-01", "hjemreise": "2026-12-15", "netter": 14, "pris_nok": 3500,
-   "pris_gjelder": "per_person", "antall_personer": null, "type": "kun_fly", "avreise_fra": "Stockholm",
-   "turoperator": "Ving", "beskrivelse": "Feil avreisested"}
-]}
+{
+ "tilbud": [
+  {
+   "destinasjon": "Phuket",
+   "utreise": "2026-11-28",
+   "hjemreise": null,
+   "netter": 14,
+   "pris_nok": 4995,
+   "pris_gjelder": "per_person",
+   "antall_personer": null,
+   "type": "kun_fly",
+   "avreise_fra": "Oslo",
+   "turoperator": "Ving",
+   "beskrivelse": "Flystol Phuket, 14 netter",
+   "lenke_nr": 1
+  },
+  {
+   "destinasjon": "Krabi",
+   "utreise": "2026-12-05",
+   "hjemreise": "2026-12-19",
+   "netter": 14,
+   "pris_nok": 23980,
+   "pris_gjelder": "totalt",
+   "antall_personer": 2,
+   "type": "pakkereise",
+   "avreise_fra": "Gardermoen",
+   "turoperator": "TUI",
+   "beskrivelse": "Ao Nang, hotell med frokost",
+   "lenke_nr": 2
+  },
+  {
+   "destinasjon": "Khao Lak",
+   "utreise": null,
+   "hjemreise": null,
+   "netter": null,
+   "pris_nok": 8990,
+   "pris_gjelder": "ukjent",
+   "antall_personer": null,
+   "type": "pakkereise",
+   "avreise_fra": null,
+   "turoperator": "Apollo",
+   "beskrivelse": "Fra-pris Khao Lak",
+   "lenke_nr": null
+  },
+  {
+   "destinasjon": "Phuket",
+   "utreise": "2026-12-15",
+   "hjemreise": "2026-12-29",
+   "netter": 14,
+   "pris_nok": 3990,
+   "pris_gjelder": "per_person",
+   "antall_personer": null,
+   "type": "kun_fly",
+   "avreise_fra": "Oslo",
+   "turoperator": "Ving",
+   "beskrivelse": "For sen hjemreise",
+   "lenke_nr": 99
+  },
+  {
+   "destinasjon": "Phuket",
+   "utreise": "2026-12-01",
+   "hjemreise": "2026-12-15",
+   "netter": 14,
+   "pris_nok": 3500,
+   "pris_gjelder": "per_person",
+   "antall_personer": null,
+   "type": "kun_fly",
+   "avreise_fra": "Stockholm",
+   "turoperator": "Ving",
+   "beskrivelse": "Feil avreisested",
+   "lenke_nr": null
+  }
+ ]
+}

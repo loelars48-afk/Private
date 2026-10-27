@@ -52,6 +52,13 @@ class GoogleFlightsTest(unittest.TestCase):
                          ("ikke inkludert", 5800))
         self.assertEqual(f["Finnair"]["bagasje"], "ukjent")
 
+    def test_lenke(self):
+        self.assertEqual(self.funn[0]["lenke"], "https://www.google.com/travel/flights")
+        uten_url = dict(self.data, search_metadata={})
+        f = google_flights.tolk_resultat(CFG, uten_url, date(2026, 11, 24), date(2026, 12, 8), "t")[0]
+        self.assertIn("OSL+to+BKK+on+2026-11-24+through+2026-12-08+for+2+adults", f["lenke"])
+        self.assertEqual(f["lenke_type"], "søk med datoer")
+
     def test_rotasjon(self):
         komb = a.dato_kombinasjoner(CFG, IDAG)
         sjekket = {nokkel(*k): "2026-10-27T00:00:00+00:00" for k in komb[1:]}
@@ -77,7 +84,13 @@ class AviasalesTest(unittest.TestCase):
         self.assertEqual(set(funn), {"2026-11-26|2026-12-09", "2026-12-03|2026-12-18"})
         bkk = funn["2026-11-26|2026-12-09"]
         self.assertEqual(bkk["pris_per_person"], 4380)
-        self.assertTrue(bkk["lenke"].startswith("https://www.aviasales.com/search/"))
+        # Lenken åpner samme billett, men for 2 voksne
+        self.assertEqual(bkk["lenke"], "https://www.aviasales.com/search/OSL2611BKK09122?t=demo")
+        self.assertEqual(bkk["lenke_type"], "billett")
+
+    def test_lenke_for_voksne(self):
+        self.assertEqual(travelpayouts.lenke_for_voksne("/search/OSL2611BKK1?t=a", 2),
+                         "https://www.aviasales.com/search/OSL2611BKK2?t=a")
 
 
 class FalskKlient:
@@ -100,16 +113,19 @@ class RestplassTest(unittest.TestCase):
 
     def test_claude_kall(self):
         klient = FalskKlient(self.svar)
-        rader = restplass.les_med_claude(CFG, "Ving", "https://x", "Phuket 4 995,-", IDAG, klient)
+        lenker = [{"href": "https://x/phuket", "tekst": "Phuket 4 995,-"}]
+        rader = restplass.les_med_claude(CFG, "Ving", "https://x", "Phuket 4 995,-", lenker, IDAG, klient)
         self.assertEqual(len(rader), 5)
         kw = klient.kall
         self.assertEqual(kw["model"], CFG["claude_modell"])
         self.assertEqual(kw["output_config"]["format"]["type"], "json_schema")
         self.assertIn("<sidetekst>\nPhuket 4 995,-\n</sidetekst>", kw["messages"][0]["content"])
+        self.assertIn("1: Phuket 4 995,- → https://x/phuket", kw["messages"][0]["content"])
+        self.assertIn("lenke_nr", kw["output_config"]["format"]["schema"]["properties"]["tilbud"]["items"]["required"])
 
     def test_avslag_gir_feil(self):
         with self.assertRaises(RuntimeError):
-            restplass.les_med_claude(CFG, "Ving", "https://x", "t", IDAG, FalskKlient({}, "refusal"))
+            restplass.les_med_claude(CFG, "Ving", "https://x", "t", [], IDAG, FalskKlient({}, "refusal"))
 
     def test_tolk_filtrerer_og_regner_per_person(self):
         tilbud = restplass.tolk(CFG, "Ving", "https://x", self.svar["tilbud"], "t")
@@ -119,6 +135,41 @@ class RestplassTest(unittest.TestCase):
         self.assertEqual(krabi["pris_per_person"], 11990)  # 23 980 totalt for 2
         self.assertIn("dato ukjent", khao["notat"])
         self.assertIn("antatt pris per person", khao["notat"])
+
+    def test_lenker_kobles_til_tilbud(self):
+        lenker = restplass.demo_side("https://ving.no/r")["lenker"]
+        tilbud = restplass.tolk(CFG, "Ving", "https://ving.no/r", self.svar["tilbud"], "t", lenker)
+        phuket, krabi, khao = tilbud
+        self.assertEqual((phuket["lenke"], phuket["lenke_type"]), ("https://ving.no/r/phuket/flystol-2811", "tilbud"))
+        self.assertEqual(krabi["lenke"], "https://ving.no/r/krabi/ao-nang-hotel")
+        # uten lenke_nr: oversiktssiden, tydelig merket
+        self.assertEqual((khao["lenke"], khao["lenke_type"]), ("https://ving.no/r", "oversiktsside"))
+        self.assertIn("fant ingen egen lenke", khao["notat"])
+
+    def test_ugyldig_lenke_nr_gir_oversiktsside(self):
+        rad = dict(self.svar["tilbud"][0], lenke_nr=99)
+        (t,) = restplass.tolk(CFG, "Ving", "https://ving.no/r", [rad], "t", [])
+        self.assertEqual(t["lenke"], "https://ving.no/r")
+
+    def test_relevante_lenker(self):
+        lenker = restplass.demo_side("https://x")["lenker"] + [
+            {"href": "https://x/thailand/khao-lak", "tekst": "Les mer"},
+            {"href": "https://x/kontakt", "tekst": "Kontakt oss"}]
+        hrefs = [l["href"] for l in restplass.relevante_lenker(lenker)]
+        self.assertEqual(hrefs, ["https://x/phuket/flystol-2811", "https://x/krabi/ao-nang-hotel",
+                                 "https://x/thailand/khao-lak"])
+
+    def test_lenker_uten_nettleser(self):
+        html = ('<html><body><a href="/phuket/hotel-x?d=2811">Phuket <b>Hotel X</b> 9 995,-</a>'
+                '<a href="https://ving.no/kontakt">Kontakt</a><script>var x=1;</script></body></html>')
+        from unittest import mock
+        svar = mock.MagicMock()
+        svar.__enter__.return_value.read.return_value = html.encode()
+        with mock.patch("urllib.request.urlopen", return_value=svar):
+            side = restplass._hent_uten_nettleser("https://www.ving.no/thailand/restplasser")
+        self.assertEqual(side["lenker"][0], {"href": "https://www.ving.no/phuket/hotel-x?d=2811",
+                                             "tekst": "Phuket Hotel X 9 995,-"})
+        self.assertNotIn("var x", side["tekst"])
 
     def test_thailand_sjekk_og_hash(self):
         self.assertTrue(restplass.nevner_thailand("Restplass til PHUKET"))
