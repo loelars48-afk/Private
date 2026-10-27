@@ -15,7 +15,7 @@ import urllib.request
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import KvoteFeil, med_bagasje, nokkel
+from . import KvoteFeil, nokkel, prisfelt
 
 API_URL = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
 FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "travelpayouts_eksempel.json"
@@ -30,13 +30,14 @@ def maaneder(fra: date, til: date) -> list[str]:
 
 
 def sporringer(cfg: dict) -> list[dict]:
-    """Én spørring per destinasjon og (utreisemåned, hjemreisemåned)."""
+    """Én spørring per avreiseflyplass, destinasjon og (utreisemåned, hjemreisemåned)."""
     forste = date.fromisoformat(cfg["tidligste_utreise"])
-    siste = date.fromisoformat(cfg["seneste_hjemkomst"])
+    siste = date.fromisoformat(cfg["seneste_avreise_hjem"])
     ut_mnd = maaneder(forste, siste - timedelta(days=cfg["min_netter"]))
     hjem_mnd = maaneder(forste + timedelta(days=cfg["min_netter"]), siste)
     return [
-        {"destination": dest, "departure_at": u, "return_at": h}
+        {"origin": fra["kode"], "destination": dest, "departure_at": u, "return_at": h}
+        for fra in cfg["avreise_flyplasser"]
         for dest in cfg["travelpayouts_destinasjoner"]
         for u in ut_mnd for h in hjem_mnd if u <= h
     ]
@@ -44,7 +45,6 @@ def sporringer(cfg: dict) -> list[dict]:
 
 def hent(cfg: dict, sporring: dict, token: str) -> list[dict]:
     params = {
-        "origin": cfg["fra_flyplass"],
         "one_way": "false",
         "direct": "false",
         "currency": cfg["valuta"].lower(),
@@ -70,7 +70,7 @@ def hent(cfg: dict, sporring: dict, token: str) -> list[dict]:
 
 def hent_demo(cfg: dict, sporring: dict, token: str) -> list[dict]:
     rader = json.loads(FIXTURE.read_text(encoding="utf-8"))["data"]
-    return [r for r in rader if r["destination"] == sporring["destination"]
+    return [r for r in rader if r["origin"] == sporring["origin"] and r["destination"] == sporring["destination"]
             and r["departure_at"].startswith(sporring["departure_at"])
             and r["return_at"].startswith(sporring["return_at"])]
 
@@ -85,7 +85,8 @@ def lenke_for_voksne(lenke: str, voksne: int) -> str:
 
 
 def tolk(cfg: dict, rader: list[dict], gyldige: set[str], tidspunkt: str) -> dict[str, dict]:
-    """Billigste tilbud per dato-kombinasjon som oppfyller kriteriene."""
+    """Billigste tilbud per dato-kombinasjon (målt på totalpris inkl. reise til
+    avreiseflyplassen) som oppfyller kriteriene."""
     beste: dict[str, dict] = {}
     for r in rader:
         try:
@@ -110,14 +111,13 @@ def tolk(cfg: dict, rader: list[dict], gyldige: set[str], tidspunkt: str) -> dic
             "stopp": stopp,
             "via": "",
             "reisetid_t": round((r.get("duration_to") or r.get("duration") or 0) / 60, 1),
-            "pris_per_person": round(pris),  # Aviasales oppgir pris for én voksen
-            "bagasje": "ukjent",
-            "pris_per_person_med_bag": med_bagasje(cfg, pris, "ukjent"),
+            # Aviasales oppgir pris for én voksen; at det finnes 2 seter er ikke sjekket.
+            **prisfelt(cfg, pris, "ukjent", r.get("origin", "OSL")),
             "lenke": lenke or "https://www.aviasales.com",
             "lenke_type": "billett" if lenke else "oversiktsside",
             "sjekket": tidspunkt,
-            "notat": "bufret pris, bekreft før bestilling",
+            "notat": "bufret pris for 1 person – bekreft pris for 2 før bestilling",
         }
-        if n not in beste or tilbud["pris_per_person"] < beste[n]["pris_per_person"]:
+        if n not in beste or tilbud["totalpris_per_person"] < beste[n]["totalpris_per_person"]:
             beste[n] = tilbud
     return beste

@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: thailand-agent
@@ -52,6 +53,15 @@ jobs:
       - name: Vis rapport i kjøringsoversikten
         if: always()
         run: '[ -f RAPPORT.md ] && cat RAPPORT.md >> "$GITHUB_STEP_SUMMARY" || true'
+
+      - name: Varsle om nye treff (GitHub-sak)
+        if: hashFiles('VARSEL.md') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tittel="$(head -n 1 VARSEL.md)"
+          { tail -n +2 VARSEL.md; echo; echo "@${{ github.repository_owner }}"; } > varsel_tekst.md
+          gh issue create --title "$tittel" --body-file varsel_tekst.md
 
       - name: Lagre resultater i repoet
         run: |

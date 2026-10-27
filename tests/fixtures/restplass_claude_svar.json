@@ -67,7 +67,35 @@
    "type": "kun_fly",
    "avreise_fra": "Stockholm",
    "turoperator": "Ving",
-   "beskrivelse": "Feil avreisested",
+   "beskrivelse": "Flystol Phuket fra Stockholm",
+   "lenke_nr": null
+  },
+  {
+   "destinasjon": "Phuket",
+   "utreise": "2026-12-01",
+   "hjemreise": "2026-12-15",
+   "netter": 14,
+   "pris_nok": 3000,
+   "pris_gjelder": "per_person",
+   "antall_personer": null,
+   "type": "kun_fly",
+   "avreise_fra": "Bergen",
+   "turoperator": "Ving",
+   "beskrivelse": "Ikke aktuell flyplass",
+   "lenke_nr": null
+  },
+  {
+   "destinasjon": "Phuket",
+   "utreise": "2026-12-08",
+   "hjemreise": "2026-12-22",
+   "netter": 14,
+   "pris_nok": 4200,
+   "pris_gjelder": "per_person",
+   "antall_personer": null,
+   "type": "kun_fly",
+   "avreise_fra": "Oslo Torp",
+   "turoperator": "TUI",
+   "beskrivelse": "Charter fra Torp",
    "lenke_nr": null
   }
  ]

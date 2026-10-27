@@ -1,18 +1,71 @@
 {
-  "success": true,
-  "currency": "nok",
-  "data": [
-    {"origin": "OSL", "destination": "BKK", "destination_airport": "BKK", "price": 4380, "airline": "QR",
-     "departure_at": "2026-11-26T15:05:00+01:00", "return_at": "2026-12-09T02:10:00+07:00",
-     "transfers": 1, "return_transfers": 1, "duration_to": 905, "link": "/search/OSL2611BKK09121?t=demo"},
-    {"origin": "OSL", "destination": "BKK", "destination_airport": "DMK", "price": 3900, "airline": "PC",
-     "departure_at": "2026-11-20T09:00:00+01:00", "return_at": "2026-12-01T09:00:00+07:00",
-     "transfers": 1, "return_transfers": 1, "duration_to": 1100, "link": "/search/demo-for-tidlig"},
-    {"origin": "OSL", "destination": "BKK", "destination_airport": "BKK", "price": 3100, "airline": "XX",
-     "departure_at": "2026-12-01T09:00:00+01:00", "return_at": "2026-12-14T09:00:00+07:00",
-     "transfers": 3, "return_transfers": 2, "duration_to": 2000, "link": "/search/demo-for-mange-stopp"},
-    {"origin": "OSL", "destination": "HKT", "destination_airport": "HKT", "price": 5600, "airline": "TK",
-     "departure_at": "2026-12-03T10:00:00+01:00", "return_at": "2026-12-18T10:00:00+07:00",
-     "transfers": 1, "return_transfers": 1, "duration_to": 1020, "link": "/search/OSL0312HKT18121?t=demo"}
-  ]
+ "success": true,
+ "currency": "nok",
+ "data": [
+  {
+   "origin": "OSL",
+   "destination": "BKK",
+   "destination_airport": "BKK",
+   "price": 4380,
+   "airline": "QR",
+   "departure_at": "2026-11-26T15:05:00+01:00",
+   "return_at": "2026-12-09T02:10:00+07:00",
+   "transfers": 1,
+   "return_transfers": 1,
+   "duration_to": 905,
+   "link": "/search/OSL2611BKK09121?t=demo"
+  },
+  {
+   "origin": "OSL",
+   "destination": "BKK",
+   "destination_airport": "DMK",
+   "price": 3900,
+   "airline": "PC",
+   "departure_at": "2026-11-20T09:00:00+01:00",
+   "return_at": "2026-12-01T09:00:00+07:00",
+   "transfers": 1,
+   "return_transfers": 1,
+   "duration_to": 1100,
+   "link": "/search/demo-for-tidlig"
+  },
+  {
+   "origin": "OSL",
+   "destination": "BKK",
+   "destination_airport": "BKK",
+   "price": 3100,
+   "airline": "XX",
+   "departure_at": "2026-12-01T09:00:00+01:00",
+   "return_at": "2026-12-14T09:00:00+07:00",
+   "transfers": 3,
+   "return_transfers": 2,
+   "duration_to": 2000,
+   "link": "/search/demo-for-mange-stopp"
+  },
+  {
+   "origin": "OSL",
+   "destination": "HKT",
+   "destination_airport": "HKT",
+   "price": 5600,
+   "airline": "TK",
+   "departure_at": "2026-12-03T10:00:00+01:00",
+   "return_at": "2026-12-18T10:00:00+07:00",
+   "transfers": 1,
+   "return_transfers": 1,
+   "duration_to": 1020,
+   "link": "/search/OSL0312HKT18121?t=demo"
+  },
+  {
+   "origin": "ARN",
+   "destination": "BKK",
+   "destination_airport": "BKK",
+   "price": 3200,
+   "airline": "TG",
+   "departure_at": "2026-11-26T12:00:00+01:00",
+   "return_at": "2026-12-09T01:00:00+07:00",
+   "transfers": 0,
+   "return_transfers": 0,
+   "duration_to": 660,
+   "link": "/search/ARN2611BKK09121?t=arn"
+  }
+ ]
 }

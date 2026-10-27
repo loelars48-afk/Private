@@ -1,6 +1,50 @@
 {
   "_kommentar": "Alle søkekriterier for Thailand-agenten. Endre her, ikke i koden.",
-  "fra_flyplass": "OSL",
+  "avreise_flyplasser": [
+    {
+      "kode": "OSL",
+      "navn": "Oslo Gardermoen",
+      "tillegg_per_person_nok": 0,
+      "sokeord": [
+        "oslo",
+        "gardermoen",
+        "osl"
+      ]
+    },
+    {
+      "kode": "ARN",
+      "navn": "Stockholm Arlanda",
+      "tillegg_per_person_nok": 1000,
+      "sokeord": [
+        "stockholm",
+        "arlanda",
+        "arn"
+      ]
+    },
+    {
+      "kode": "CPH",
+      "navn": "København Kastrup",
+      "tillegg_per_person_nok": 1000,
+      "sokeord": [
+        "københavn",
+        "kobenhavn",
+        "copenhagen",
+        "kastrup",
+        "cph"
+      ]
+    },
+    {
+      "kode": "TRF",
+      "navn": "Sandefjord Torp",
+      "tillegg_per_person_nok": 400,
+      "sokeord": [
+        "torp",
+        "sandefjord",
+        "trf"
+      ]
+    }
+  ],
+  "_tillegg": "tillegg_per_person_nok = anslått reise tur/retur fra Oslo til flyplassen (tog/buss/fly). Juster gjerne.",
   "til_flyplasser": [
     "BKK",
     "DMK",
@@ -10,13 +54,17 @@
   ],
   "voksne": 2,
   "tidligste_utreise": "2026-11-24",
-  "seneste_hjemkomst": "2026-12-22",
+  "seneste_avreise_hjem": "2026-12-21",
+  "_hjem": "Avreise fra Thailand senest 21.12, slik at nattfly lander i Oslo senest 22.12.",
   "min_netter": 10,
   "maks_netter": 21,
   "maks_pris_per_person_nok": 5000,
+  "maks_pris_pakke_per_person_nok": 10000,
   "nesten_treff_margin_nok": 1000,
+  "treff_gyldig_timer": 48,
   "maks_stopp": 2,
   "pris_fra_api_er_totalt_for_alle": true,
+  "mistenkelig_lav_pris_per_person_nok": 2500,
   "estimert_innsjekket_bagasje_per_person_per_vei_nok": 600,
   "sok_per_kjoring": 2,
   "valuta": "NOK",

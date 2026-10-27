@@ -19,7 +19,7 @@ from html import unescape
 from urllib.parse import urljoin
 from pathlib import Path
 
-from . import med_bagasje
+from . import flyplass_fra_tekst, prisfelt
 
 FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "restplass_claude_svar.json"
 
@@ -218,12 +218,20 @@ def tolk(cfg: dict, navn: str, url: str, rader: list[dict], tidspunkt: str,
     ofte bare viser en fra-pris.
     """
     forste = date.fromisoformat(cfg["tidligste_utreise"])
-    siste = date.fromisoformat(cfg["seneste_hjemkomst"])
+    # Charterfly hjem fra Thailand går ofte på dagtid og lander samme dag, så
+    # hjemreise dagen etter seneste_avreise_hjem tillates – men merkes.
+    siste_rutefly = date.fromisoformat(cfg["seneste_avreise_hjem"])
+    siste = siste_rutefly + timedelta(days=1)
     ut_liste = []
     for r in rader:
-        fra = (r.get("avreise_fra") or "").lower()
-        if fra and not any(o in fra for o in ("oslo", "gardermoen", "osl")):
-            continue
+        notater = []
+        if r.get("avreise_fra"):
+            fra = flyplass_fra_tekst(cfg, r["avreise_fra"])
+            if fra is None:  # avreise fra en flyplass som ikke er aktuell
+                continue
+        else:
+            fra = cfg["avreise_flyplasser"][0]["kode"]
+            notater.append("avreisested ikke oppgitt, antatt Oslo")
         ut, hjem = _dato(r.get("utreise")), _dato(r.get("hjemreise"))
         if ut and not hjem and r.get("netter"):
             hjem = ut + timedelta(days=r["netter"])
@@ -231,6 +239,8 @@ def tolk(cfg: dict, navn: str, url: str, rader: list[dict], tidspunkt: str,
             continue
         if hjem and hjem > siste:
             continue
+        if hjem and hjem > siste_rutefly:
+            notater.append(f"hjemreise {hjem:%d.%m} – sjekk at flyet lander samme dag")
         netter = (hjem - ut).days if ut and hjem else r.get("netter")
         if ut and hjem and not cfg["min_netter"] <= netter <= cfg["maks_netter"]:
             continue
@@ -238,7 +248,6 @@ def tolk(cfg: dict, navn: str, url: str, rader: list[dict], tidspunkt: str,
         pris = r["pris_nok"]
         if pris < 500:  # depositum, tillegg o.l. er ikke en reisepris
             continue
-        notater = []
         if r["pris_gjelder"] == "totalt" and r.get("antall_personer"):
             per_person = pris / r["antall_personer"]
         else:
@@ -267,9 +276,7 @@ def tolk(cfg: dict, navn: str, url: str, rader: list[dict], tidspunkt: str,
             "stopp": "",  # restplass-sidene oppgir sjelden antall stopp
             "via": "",
             "reisetid_t": "",
-            "pris_per_person": round(per_person),
-            "bagasje": bag,
-            "pris_per_person_med_bag": med_bagasje(cfg, per_person, bag),
+            **prisfelt(cfg, per_person, bag, fra),
             "lenke": lenke,
             "lenke_type": lenke_type,
             "sjekket": tidspunkt,

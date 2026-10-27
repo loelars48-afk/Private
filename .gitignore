@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 .env
+VARSEL.md
+varsel_tekst.md
