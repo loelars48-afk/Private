@@ -28,6 +28,18 @@ avreiseflyplassen**:
 
 Tilleggene er grove anslag. Juster dem i `config.json` (`tillegg_per_person_nok`).
 
+## Rapporten
+
+`RAPPORT.md` starter med **«Kort fortalt»**, en oppsummering du kan lese på 30 sekunder:
+
+- **Konklusjon** i én setning: er det funnet reiser innenfor grensen, og hva er billigst?
+- **Tabell med to kolonner:** billigste *kun fly* og billigste *fly + hotell*, med sted, datoer,
+  pris per person, pris for to, om den er innenfor grensen, prisendring siden forrige sjekk og lenke.
+- **Anbefaling:** hva pakken koster ekstra sammenlignet med bare fly, omregnet til pris per natt for hotellet.
+- **Datagrunnlag:** hvor mange kilder som ga svar.
+
+Under oppsummeringen følger alle funn i detalj.
+
 ## Varsling
 
 Når agenten finner treff som er nye, eller som har blitt minst 5 % billigere siden forrige varsel,

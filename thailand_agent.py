@@ -359,7 +359,126 @@ def lag_varsel(cfg: dict, treff: list[dict], tilstand: dict) -> tuple[str, str] 
     return tittel, tekst
 
 
-def lag_rapport(cfg, funn, kombinasjoner, tilstand, kildestatus, nå, logg) -> str:
+KATEGORIER = ("Kun fly", "Fly + hotell")
+
+
+def kategori(f: dict) -> str:
+    return "Fly + hotell" if f["type"].startswith("pakkereise") else "Kun fly"
+
+
+def beste_per_kategori(cfg: dict, k: dict, nå: datetime) -> dict[str, dict | None]:
+    """Billigste ferske tilbud i hver kategori (tilbud uten dato vises med «dato ukjent»)."""
+    beste = {}
+    for kat in KATEGORIER:
+        ferske = [f for f in k["alle"] if kategori(f) == kat and er_fersk(cfg, f, nå)]
+        beste[kat] = min(ferske, key=lambda f: f["totalpris_per_person"]) if ferske else None
+    return beste
+
+
+def stednavn(cfg: dict, kode: str) -> str:
+    """Flyplasskode → lesbart navn («HKT» → «Phuket»). Fritekst fra restplass beholdes."""
+    for f in cfg["avreise_flyplasser"]:
+        if f["kode"] == kode:
+            return f["navn"]
+    return FLYPLASSER.get(kode, kode)
+
+
+def kort_kilde(kilde: str) -> str:
+    deler = kilde.split(", ")
+    return kilde if len(deler) <= 2 else f"{deler[0]} m.fl. ({len(deler)} sider)"
+
+
+def endring_tekst(pris: int, forrige: int | None) -> str:
+    if forrige is None:
+        return "nytt funn"
+    if pris < forrige:
+        return f"↓ {kr(forrige - pris)} billigere"
+    if pris > forrige:
+        return f"↑ {kr(pris - forrige)} dyrere"
+    return "uendret"
+
+
+def lag_sammendrag(cfg: dict, k: dict, beste: dict, forrige_beste: dict, kildestatus: dict) -> list[str]:
+    """«Kort fortalt»: konklusjon, beste valg per kategori, anbefaling og datagrunnlag."""
+    voksne = cfg["voksne"]
+    funnet = [f for f in beste.values() if f]
+
+    # Konklusjon
+    if k["treff"]:
+        b = k["treff"][0]
+        konklusjon = (f"✅ **Agenten har funnet {len(k['treff'])} "
+                      f"{'reise' if len(k['treff']) == 1 else 'reiser'} innenfor grensen.** "
+                      f"Billigst er {stednavn(cfg, b['til'])} {dato_tekst(b)} til "
+                      f"**{kr(b['totalpris_per_person'])} per person**.")
+    elif funnet:
+        n = min(funnet, key=lambda f: f["totalpris_per_person"] - grense(cfg, f))
+        over = n["totalpris_per_person"] - grense(cfg, n)
+        konklusjon = (f"**Ingen reiser innenfor grensen akkurat nå.** Nærmest er {kategori(n).lower()} til "
+                      f"{stednavn(cfg, n['til'])} til {kr(n['totalpris_per_person'])} per person – "
+                      f"{kr(over)} over grensen.")
+    else:
+        konklusjon = ("**Agenten har ikke funnet noen reiser ennå.** Sjekk at nøklene er lagt inn "
+                      "(se «Kilder» nederst i rapporten).")
+
+    linjer = ["## Kort fortalt", "", konklusjon, ""]
+
+    # Beste valg per kategori, side om side
+    if funnet:
+        def celle(kat, felt):
+            f = beste[kat]
+            if not f:
+                return "–"
+            if felt == "hvor":
+                return f"{stednavn(cfg, f['til'])} (fra {stednavn(cfg, f['fra'])})"
+            if felt == "datoer":
+                return dato_tekst(f)
+            if felt == "pp":
+                return f"**{kr(f['totalpris_per_person'])}**"
+            if felt == "to":
+                return f"**{kr(f['totalpris_per_person'] * voksne)}**"
+            if felt == "grense":
+                over = f["totalpris_per_person"] - grense(cfg, f)
+                return (f"✅ innenfor ({kr(grense(cfg, f))})" if over <= 0
+                        else f"❌ {kr(over)} over ({kr(grense(cfg, f))})")
+            if felt == "endring":
+                return endring_tekst(f["totalpris_per_person"], forrige_beste.get(kat))
+            if felt == "kilde":
+                return kort_kilde(f["kilde"])
+            return lenke(f, lang=True)
+
+        rader = [("Hvor", "hvor"), ("Reisedatoer", "datoer"), ("Pris per person", "pp"),
+                 (f"Pris for {voksne}", "to"), ("Grense", "grense"), ("Siden forrige sjekk", "endring"),
+                 ("Kilde", "kilde"), ("Lenke", "lenke")]
+        linjer += [f"| | ✈️ **Billigste kun fly** | 🏖️ **Billigste fly + hotell** |", "|---|---|---|"]
+        linjer += [f"| **{navn}** | {celle('Kun fly', felt)} | {celle('Fly + hotell', felt)} |"
+                   for navn, felt in rader]
+        linjer.append("")
+
+    # Anbefaling
+    fly, pakke = beste["Kun fly"], beste["Fly + hotell"]
+    if fly and pakke:
+        diff = pakke["totalpris_per_person"] - fly["totalpris_per_person"]
+        netter = pakke["netter"] if isinstance(pakke["netter"], int) and pakke["netter"] > 0 else None
+        if diff <= 0:
+            anbefaling = "Fly + hotell er billigere enn bare fly akkurat nå – se på pakken først."
+        elif netter:
+            anbefaling = (f"Fly + hotell koster {kr(diff)} mer per person enn bare fly, det vil si ca. "
+                          f"{kr(diff / netter)} per natt for hotellet (grovt regnestykke, datoene kan være "
+                          "ulike). Er det billigere enn å bestille hotell selv, er pakken best.")
+        else:
+            anbefaling = (f"Fly + hotell koster {kr(diff)} mer per person enn bare fly, men da er hotellet "
+                          "inkludert. Pakken har ingen oppgitt dato – sjekk datoene på siden.")
+        linjer += [f"**Anbefaling:** {anbefaling}", ""]
+    elif k["treff"]:
+        linjer += ["**Anbefaling:** Sjekk lenken i tabellen snart – lavpriser forsvinner raskt.", ""]
+
+    virker = sum(1 for st in kildestatus.values() if not st.startswith(("av", "feil", "kvote")))
+    linjer += [f"**Datagrunnlag:** {virker} av {len(kildestatus)} kilder ga svar i denne kjøringen. "
+               "Prisene er øyeblikksbilder – sjekk alltid lenken før du betaler.", ""]
+    return linjer
+
+
+def lag_rapport(cfg, funn, kombinasjoner, tilstand, kildestatus, nå, logg, forrige_beste=None) -> str:
     k = klassifiser(cfg, funn, nå)
     maks, pakke = cfg["maks_pris_per_person_nok"], cfg["maks_pris_pakke_per_person_nok"]
     margin = cfg["nesten_treff_margin_nok"]
@@ -388,6 +507,9 @@ def lag_rapport(cfg, funn, kombinasjoner, tilstand, kildestatus, nå, logg) -> s
         "# Thailand-agenten – rapport",
         "",
         f"Sist oppdatert: {nå.strftime('%Y-%m-%d %H:%M')} UTC",
+        "",
+        *lag_sammendrag(cfg, k, beste_per_kategori(cfg, k, nå), forrige_beste or {}, kildestatus),
+        "## Alle funn",
         "",
         status,
         "",
@@ -531,7 +653,12 @@ def kjor(args) -> int:
                 skriver.writeheader()
             skriver.writerows(nye)
 
-    varsel = lag_varsel(cfg, klassifiser(cfg, funn, nå)["treff"], tilstand)
+    k = klassifiser(cfg, funn, nå)
+    varsel = lag_varsel(cfg, k["treff"], tilstand)
+    # Beste pris per kategori huskes, så sammendraget kan vise endring siden forrige sjekk.
+    forrige_beste = tilstand.get("forrige_beste", {})
+    tilstand["forrige_beste"] = {kat: f["totalpris_per_person"]
+                                 for kat, f in beste_per_kategori(cfg, k, nå).items() if f}
     lagre_json(tilstand_sti, tilstand)
     varsel_sti = Path(args.varsel)
     if varsel:
@@ -540,7 +667,7 @@ def kjor(args) -> int:
     elif varsel_sti.exists():
         varsel_sti.unlink()
 
-    rapport = lag_rapport(cfg, funn, kombinasjoner, tilstand, kildestatus, nå, logg)
+    rapport = lag_rapport(cfg, funn, kombinasjoner, tilstand, kildestatus, nå, logg, forrige_beste)
     Path(args.rapport).write_text(rapport, encoding="utf-8")
     print("\n".join(logg))
     print(f"Rapport skrevet til {args.rapport}")

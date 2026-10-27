@@ -272,6 +272,41 @@ class KlassifiseringTest(unittest.TestCase):
         self.assertEqual((k["treff"], len(k["nesten"])), ([], 1))
 
 
+class SammendragTest(unittest.TestCase):
+    def sammendrag(self, *rader, forrige=None):
+        funn = {"google_flights": {str(i): r for i, r in enumerate(rader)}, "aviasales": {}, "restplass": {}}
+        k = a.klassifiser(CFG, funn, NÅ)
+        tekst = "\n".join(a.lag_sammendrag(CFG, k, a.beste_per_kategori(CFG, k, NÅ), forrige or {},
+                                           {"Google Flights (SerpApi)": "ok, 2 søk"}))
+        return tekst
+
+    def test_treff_med_stedsnavn_og_pris_for_to(self):
+        t = self.sammendrag(tilbud(til="HKT", totalpris_per_person=4500))
+        self.assertIn("1 reise innenfor grensen", t)
+        self.assertIn("Phuket", t)
+        self.assertNotIn("HKT (", t)
+        self.assertIn("**9 000 kr**", t)  # pris for 2
+        self.assertIn("✅ innenfor", t)
+
+    def test_ingen_treff_viser_avstand_til_grensen(self):
+        t = self.sammendrag(tilbud(totalpris_per_person=7450))
+        self.assertIn("Ingen reiser innenfor grensen", t)
+        self.assertIn("2 450 kr over grensen", t)
+
+    def test_ingen_data(self):
+        self.assertIn("ikke funnet noen reiser ennå", self.sammendrag())
+
+    def test_endring_siden_sist_og_anbefaling(self):
+        pakke = tilbud(type="pakkereise (fly + hotell)", kilde="Ving", totalpris_per_person=8800, netter=14,
+                       utreise="2026-12-06", hjemreise="2026-12-20")
+        t = self.sammendrag(tilbud(totalpris_per_person=7400), pakke,
+                            forrige={"Kun fly": 7700, "Fly + hotell": 8800})
+        self.assertIn("↓ 300 kr billigere", t)
+        self.assertIn("uendret", t)
+        self.assertIn("1 400 kr mer per person", t)
+        self.assertIn("ca. 100 kr per natt", t)
+
+
 class VarselTest(unittest.TestCase):
     def test_varsler_bare_nye_og_billigere(self):
         tilstand = {}
@@ -312,7 +347,7 @@ class EndeTilEndeTest(unittest.TestCase):
                     capture_output=True, text=True)
                 self.assertEqual(r.returncode, 0, r.stderr)
             tekst = rapport.read_text(encoding="utf-8")
-            for seksjon in ("## Treff", "## Eldre funn", "## Restplass og pakkereiser", "## Kilder",
+            for seksjon in ("## Kort fortalt", "Billigste kun fly", "## Treff", "## Eldre funn", "## Restplass og pakkereiser", "## Kilder",
                             "Aviasales", "Khao Lak", "reise til ARN"):
                 self.assertIn(seksjon, tekst)
             funn = json.loads((Path(tmp) / "funn.json").read_text())
