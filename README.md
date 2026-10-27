@@ -1,14 +1,14 @@
 # Thailand-agenten ✈️🇹🇭
 
-Agenten leter automatisk etter billige tur/retur-billetter **Oslo Gardermoen → Thailand**
-for **2 voksne**, og skriver resultatet til [`RAPPORT.md`](RAPPORT.md).
+Agenten leter automatisk etter billige reiser **Oslo Gardermoen → Thailand** for **2 voksne**
+i flere kilder samtidig, og samler alt i [`RAPPORT.md`](RAPPORT.md).
 
 | Kriterium | Verdi |
 |---|---|
 | Utreise | fra 24. november 2026 |
 | Hjemme | senest 22. desember 2026 |
 | Lengde | 10–21 netter |
-| Destinasjoner | Bangkok (BKK, DMK), Phuket (HKT), Krabi (KBV), Koh Samui (USM) |
+| Destinasjoner | Bangkok (BKK, DMK), Phuket (HKT), Krabi (KBV), Koh Samui (USM) + alle Thailand-tilbud på restplass-sidene |
 | Makspris | 5 000 kr **per person** (nesten-treff vises opp til 6 000 kr) |
 | Stopp | maks 2 |
 | Bagasje | pris vises både uten og med innsjekket bagasje (estimat) |
@@ -16,64 +16,88 @@ for **2 voksne**, og skriver resultatet til [`RAPPORT.md`](RAPPORT.md).
 
 Alt endres i [`config.json`](config.json).
 
-## Oppsett (5 minutter)
+## Kildene
 
-1. Lag en konto på **serpapi.com** og kopier API-nøkkelen fra *Dashboard*.
-2. I GitHub-repoet går du til **Settings → Secrets and variables → Actions → New repository secret**.
-   Kall den `SERPAPI_KEY` og lim inn nøkkelen.
-3. Gå til **Actions → Thailand-agent → Run workflow** for å starte første søk med én gang.
-4. Åpne `RAPPORT.md` i repoet. Rapporten vises også i oppsummeringen for hver kjøring under Actions.
+| Kilde | Hva den gir | Nøkkel (GitHub-secret) | Kostnad |
+|---|---|---|---|
+| **Aviasales / Travelpayouts** | Bufrede lavpriser for *alle* datoer i perioden. Finner billige datoer raskt. | `TRAVELPAYOUTS_TOKEN` | Gratis |
+| **Google Flights** (SerpApi) | Ferske priser. Bekrefter først billige Aviasales-datoer, så roterer den gjennom resten. | `SERPAPI_KEY` | Gratisnivå eller betalt |
+| **Restplass- og chartersider** | Restplasser og charter (kun fly og pakkereiser) fra sidene under. Claude leser sidene. | `ANTHROPIC_API_KEY` | Etter forbruk, se under |
+
+Restplass-sidene som sjekkes (listen `restplass_sider` i `config.json`):
+
+- [restplass.no – Thailand](https://www.restplass.no/charter/thailand) (samler Apollo, Ving, TUI m.fl.)
+- [Ving – restplasser Thailand](https://www.ving.no/thailand/restplasser)
+- [Travelmarket – restplasser Thailand](https://www.travelmarket.no/thailand/restplasser.cfm)
+- [Lastminutecharter – Thailand](https://lastminutecharter.eu/restplasser/thailand)
+- Reiseguiden, TUI og Apollo: adressene er **ikke bekreftet**. Rapportens kildetabell viser om de virker.
+  Bytt adresse i `config.json` hvis en side viser «kunne ikke åpne» eller «nevner ikke Thailand».
+
+Hver kilde er valgfri: mangler en nøkkel, hoppes den kilden over, og rapporten sier det.
+
+**Ikke tatt med (bevisst):** Momondo, Kayak og Skyscanner blokkerer roboter, og Skyscanners API er bare
+for partnere. De samme flyselskapene dekkes i praksis av Google Flights og Aviasales.
+
+## Oppsett
+
+Legg inn nøklene i GitHub-repoet under **Settings → Secrets and variables → Actions → New repository secret**:
+
+1. `TRAVELPAYOUTS_TOKEN`: lag en gratis konto på travelpayouts.com. Tokenet ligger under
+   *Profile → API token* (eventuelt *Tools → API*).
+2. `SERPAPI_KEY`: konto på serpapi.com. Nøkkelen ligger på dashbordet.
+3. `ANTHROPIC_API_KEY`: konto på console.anthropic.com, legg inn betalingskort og lag en API-nøkkel.
+   Sett gjerne en månedlig utgiftsgrense der.
+
+Start deretter første kjøring: **Actions → Thailand-agent → Run workflow**.
 
 ## Slik virker den
 
-- Det finnes **162 dato-kombinasjoner** (utreise × hjemreise) i reisevinduet.
-  Google Flights krever ett søk per kombinasjon. Alle fem flyplassene dekkes i samme søk.
-- Hver kjøring søker på noen få kombinasjoner og roterer. Usjekkede datoer kommer først,
-  og deretter de som er sjekket for lengst siden. Første runde sprer seg over hele perioden.
-- Det billigste alternativet per dato lagres i `data/funn.json`. Alle funn logges i
-  `data/prishistorikk.csv`.
-- Datoer som har passert, fjernes automatisk.
+1. **Aviasales** hentes for hele perioden (8 kall, gratis). Det gir priser på mange datoer.
+2. **Restplass-sidene** åpnes i en ekte nettleser (Playwright). Nevner siden Thailand og har innholdet
+   endret seg siden sist, leser Claude teksten og returnerer tilbudene som strukturerte data:
+   destinasjon, datoer, pris, per person eller totalt, kun fly eller pakkereise. Agenten filtrerer
+   deretter på reisevinduet og avreise fra Oslo. Like tilbud fra flere samlesider slås sammen.
+3. **Google Flights** søker på noen få dato-kombinasjoner per kjøring. Datoer Aviasales har
+   funnet under 6 000 kr per person sjekkes først, slik at bufrede priser blir bekreftet med ferske.
+4. Alt samles i `RAPPORT.md`. Historikken lagres i `data/prishistorikk.csv`.
 
-## API-kvote: velg tempo
+## Kostnader
 
-`sok_per_kjoring` i `config.json` styrer forbruket. Med 2 kjøringer per dag og ca. 46 dager igjen
-av søkevinduet:
+| Kilde | Per måned (anslag) | Kommentar |
+|---|---|---|
+| Aviasales | 0 kr | |
+| Google Flights | 0 kr på gratisnivå | ~120 søk/mnd med standardinnstilling (`sok_per_kjoring: 2`). Sjekk serpapi.com/pricing. |
+| Claude (`claude-opus-5-5`) | ca. 50–200 kr | Avhenger av hvor store sidene er og hvor ofte de endres. Claude brukes bare når en side er endret. |
+| Claude (`claude-haiku-5-5`) | under 10 kr | Billigere modell. Sannsynligvis god nok til å lese prislister, men ikke testet her. |
 
-| `sok_per_kjoring` | Søk per måned | Hele vinduet dekket på | Passer for |
-|---:|---:|---|---|
-| 1 | ~60 | ~81 dager (rekker ikke alt) | gratisnivå |
-| **2 (standard)** | ~120 | ~41 dager | gratisnivå *hvis* kvoten er ≥ 120 |
-| 4 | ~240 | ~20 dager | betalt nivå |
-| 8 | ~480 | ~10 dager | betalt nivå, best dekning |
-
-Sjekk gjeldende kvote og pris på serpapi.com/pricing. Når kvoten er brukt opp, stopper
-agenten pent og skriver det i loggen nederst i rapporten.
+Modellen velges med `claude_modell` i `config.json`.
 
 ## Viktige begrensninger
 
-- **Restplasser og charter** (Ving, TUI, Apollo) finnes ikke i Google Flights.
-  Rapporten har lenker til disse, men de må sjekkes manuelt.
-- **Bagasje:** Google Flights oppgir ikke alltid prisen for innsjekket bagasje.
-  Kolonnen «Med innsj. bag» legger til et *estimat* (600 kr per person per vei, kan endres i config).
-- **Priser er øyeblikksbilder.** Lavpriser kan forsvinne i løpet av timer. Sjekk alltid
-  «Sjekket»-tidspunktet, og bekreft prisen før du bestiller.
-- Agenten **bestiller ingenting**. Den finner og rapporterer.
+- **Priser er øyeblikksbilder.** Aviasales-priser kan være flere døgn gamle. Sjekk «Sjekket»-tidspunktet
+  og bekreft prisen før du bestiller.
+- **Restplass-tilbud tolkes av Claude.** Står det ikke tydelig om prisen er per person, merkes raden
+  «antatt pris per person». Tilbud uten dato merkes «dato ukjent» og vises bare i restplass-seksjonen.
+- **Pakkereiser** inkluderer hotell og er derfor ikke direkte sammenlignbare med kun fly.
+- **Bagasje:** kolonnen «Med innsj. bag» bruker et *estimat* (600 kr per person per vei) når bagasje
+  ikke er oppgitt.
+- Agenten **bestiller ingenting**.
 
 ### Antakelser som bør bekreftes etter første ekte kjøring
 
-Disse er ikke testet mot SerpApi live, fordi utviklingsmiljøet ikke hadde tilgang:
+Utviklingsmiljøet hadde ikke tilgang til disse tjenestene, så de er testet med eksempeldata:
 
-1. At `price` fra SerpApi er **totalt for begge** reisende (Google Flights viser totalpris).
-   Sammenlign én pris i rapporten med Google Flights. Hvis prisen er per person, sett
-   `"pris_fra_api_er_totalt_for_alle": false` i config.
-2. At bagasjetekstene kommer på engelsk, for eksempel «Checked baggage for a fee».
-   Hvis kolonnen bare viser «ukjent», må tolkingen justeres.
+1. At SerpApi oppgir prisen **totalt for begge** reisende. Sammenlign med Google Flights. Er prisen
+   per person, sett `"pris_fra_api_er_totalt_for_alle": false`.
+2. At Aviasales-feltene (`price`, `departure_at`, `return_at`, `transfers`, `link`) heter det koden
+   forventer. Viser kildetabellen «ok», men 0 treff over lengre tid, må dette sjekkes.
+3. At restplass-sidene lar seg åpne fra GitHub Actions uten å blokkere. Se sidetabellen i rapporten.
 
 ## Lokalt
 
 ```bash
-python thailand_agent.py --dry-run          # vis neste søk
-python thailand_agent.py --demo --data-dir /tmp/demo --rapport /tmp/demo.md   # testdata
-SERPAPI_KEY=... python thailand_agent.py    # ekte søk
-python -m unittest discover -s tests        # tester
+pip install -r requirements.txt && python -m playwright install chromium
+python thailand_agent.py --demo --data-dir /tmp/demo --rapport /tmp/demo.md   # testdata, ingen nøkler
+python thailand_agent.py --dry-run                                             # vis neste Google-søk
+python -m unittest discover -s tests                                           # tester
 ```

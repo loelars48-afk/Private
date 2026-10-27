@@ -1,7 +1,13 @@
 {
   "_kommentar": "Alle søkekriterier for Thailand-agenten. Endre her, ikke i koden.",
   "fra_flyplass": "OSL",
-  "til_flyplasser": ["BKK", "DMK", "HKT", "KBV", "USM"],
+  "til_flyplasser": [
+    "BKK",
+    "DMK",
+    "HKT",
+    "KBV",
+    "USM"
+  ],
   "voksne": 2,
   "tidligste_utreise": "2026-11-24",
   "seneste_hjemkomst": "2026-12-22",
@@ -13,5 +19,42 @@
   "pris_fra_api_er_totalt_for_alle": true,
   "estimert_innsjekket_bagasje_per_person_per_vei_nok": 600,
   "sok_per_kjoring": 2,
-  "valuta": "NOK"
+  "valuta": "NOK",
+  "travelpayouts_destinasjoner": [
+    "BKK",
+    "HKT",
+    "KBV",
+    "USM"
+  ],
+  "claude_modell": "claude-opus-5-5",
+  "restplass_sider": [
+    {
+      "navn": "restplass.no",
+      "url": "https://www.restplass.no/charter/thailand"
+    },
+    {
+      "navn": "Ving",
+      "url": "https://www.ving.no/thailand/restplasser"
+    },
+    {
+      "navn": "Travelmarket",
+      "url": "https://www.travelmarket.no/thailand/restplasser.cfm"
+    },
+    {
+      "navn": "Lastminutecharter",
+      "url": "https://lastminutecharter.eu/restplasser/thailand"
+    },
+    {
+      "navn": "Reiseguiden",
+      "url": "https://www.reiseguiden.no/restplasser/thailand"
+    },
+    {
+      "navn": "TUI",
+      "url": "https://www.tui.no/restplasser/"
+    },
+    {
+      "navn": "Apollo",
+      "url": "https://www.apollo.no/restplasser"
+    }
+  ]
 }

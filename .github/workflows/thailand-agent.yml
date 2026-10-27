@@ -20,13 +20,19 @@ concurrency:
 jobs:
   sok:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+
+      - name: Installer avhengigheter og nettleser
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
 
       - name: Kjør tester
         run: python -m unittest discover -s tests
@@ -34,6 +40,8 @@ jobs:
       - name: Søk etter reiser
         env:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+          TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           if [ -n "${{ github.event.inputs.antall }}" ]; then
             python thailand_agent.py --antall "${{ github.event.inputs.antall }}"

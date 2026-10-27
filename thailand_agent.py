@@ -1,37 +1,34 @@
 #!/usr/bin/env python3
-"""Thailand-agenten: leter etter billige tur/retur-billetter Oslo -> Thailand.
+"""Thailand-agenten: leter etter billige reiser Oslo -> Thailand i flere kilder.
 
-Agenten henter priser fra Google Flights via SerpApi. Hver kjøring sjekker
-noen få dato-kombinasjoner (for å spare API-kvote) og roterer slik at alle
-kombinasjoner innenfor reisevinduet blir sjekket etter hvert. Resultatene
-lagres i data/ og oppsummeres i RAPPORT.md.
+Kilder (hver brukes bare hvis nøkkelen er satt):
+  1. Aviasales/Travelpayouts (TRAVELPAYOUTS_TOKEN): gratis, bufrede lavpriser for hele perioden.
+  2. Google Flights via SerpApi (SERPAPI_KEY): ferske priser. Bekrefter først datoene
+     Aviasales har funnet billige, og roterer deretter gjennom resten.
+  3. Restplass- og chartersider (ANTHROPIC_API_KEY): sidene åpnes i nettleser og
+     Claude plukker ut Thailand-tilbudene.
+
+Resultatene lagres i data/ og oppsummeres i RAPPORT.md.
 
 Bruk:
-    SERPAPI_KEY=... python thailand_agent.py          # ekte søk
-    python thailand_agent.py --demo                    # testdata, ingen nøkkel
-    python thailand_agent.py --dry-run                 # vis hva som ville blitt søkt
+    python thailand_agent.py              # ekte søk med nøklene som er satt
+    python thailand_agent.py --demo       # testdata, ingen nøkler eller nett
+    python thailand_agent.py --dry-run    # vis neste Google Flights-søk
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 import os
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-SERPAPI_URL = "https://serpapi.com/search.json"
-FIXTURE = ROOT / "tests" / "fixtures" / "serpapi_eksempel.json"
+from kilder import KvoteFeil, google_flights, nokkel, restplass, travelpayouts
 
-# SerpApi "stops": 1 = kun direkte, 2 = maks 1 stopp, 3 = maks 2 stopp
-STOPS_PARAM = {0: 1, 1: 2, 2: 3}
+ROOT = Path(__file__).resolve().parent
 
 FLYPLASSER = {
     "BKK": "Bangkok Suvarnabhumi",
@@ -41,19 +38,12 @@ FLYPLASSER = {
     "USM": "Koh Samui",
 }
 
-# Restplass/charter finnes ikke i Google Flights og må sjekkes manuelt.
-RESTPLASS_LENKER = [
-    ("Ving", "https://www.ving.no"),
-    ("TUI", "https://www.tui.no"),
-    ("Apollo", "https://www.apollo.no"),
-]
+HISTORIKK_FELT = ["kilde", "type", "utreise", "hjemreise", "netter", "til", "flyselskap", "stopp", "via",
+                  "reisetid_t", "pris_per_person", "bagasje", "pris_per_person_med_bag", "lenke",
+                  "sjekket", "notat"]
 
 
-class KvoteFeil(Exception):
-    """API-et nekter flere søk (kvote brukt opp eller ugyldig nøkkel)."""
-
-
-# ---------------------------------------------------------------- konfig/lagring
+# ---------------------------------------------------------------- lagring
 
 def last_json(sti: Path, standard):
     if sti.exists():
@@ -84,123 +74,109 @@ def dato_kombinasjoner(cfg: dict, idag: date) -> list[tuple[date, date]]:
     return kombinasjoner
 
 
-def nokkel(ut: date, hjem: date) -> str:
-    return f"{ut.isoformat()}|{hjem.isoformat()}"
+# ---------------------------------------------------------------- kildene
 
-
-def velg_neste_sok(kombinasjoner, sjekket: dict, antall: int):
-    """Usjekkede først, deretter de som er sjekket for lengst siden.
-
-    Innenfor samme prioritet stokkes rekkefølgen deterministisk (hash), slik at
-    de første søkene sprer seg over hele perioden i stedet for å starte med
-    alle varianter av første utreisedato.
-    """
-    def sortering(k):
-        n = nokkel(*k)
-        return (sjekket.get(n, ""), hashlib.sha1(n.encode()).hexdigest())
-
-    return sorted(kombinasjoner, key=sortering)[:antall]
-
-
-# ---------------------------------------------------------------- API
-
-def sok_serpapi(cfg: dict, ut: date, hjem: date, api_key: str) -> dict:
-    params = {
-        "engine": "google_flights",
-        "departure_id": cfg["fra_flyplass"],
-        "arrival_id": ",".join(cfg["til_flyplasser"]),
-        "outbound_date": ut.isoformat(),
-        "return_date": hjem.isoformat(),
-        "type": 1,
-        "adults": cfg["voksne"],
-        "currency": cfg["valuta"],
-        "hl": "en",  # engelsk gir forutsigbare bagasjetekster å tolke
-        "gl": "no",
-        "stops": STOPS_PARAM[cfg["maks_stopp"]],
-        "api_key": api_key,
-    }
-    url = SERPAPI_URL + "?" + urllib.parse.urlencode(params)
-    try:
-        with urllib.request.urlopen(url, timeout=90) as svar:
-            data = json.load(svar)
-    except urllib.error.HTTPError as e:
-        tekst = e.read().decode("utf-8", "replace")
-        if e.code in (401, 403, 429):
-            raise KvoteFeil(f"HTTP {e.code}: {tekst[:200]}") from e
+def kjor_aviasales(cfg, token, demo, funn, gyldige, tidspunkt, logg) -> str:
+    hent = travelpayouts.hent_demo if demo else travelpayouts.hent
+    rader, feil = [], []
+    for sporring in travelpayouts.sporringer(cfg):
         try:
-            data = json.loads(tekst)
-        except ValueError:
-            raise RuntimeError(f"HTTP {e.code}: {tekst[:200]}") from e
-    feil = data.get("error", "")
-    if feil and any(o in feil.lower() for o in ("run out", "limit", "invalid api key")):
-        raise KvoteFeil(feil)
-    return data
+            rader += hent(cfg, sporring, token)
+        except KvoteFeil as e:
+            feil.append(f"nøkkel/kvote ({e})")
+            break
+        except Exception as e:
+            feil.append(f"{sporring['destination']} {sporring['departure_at']}: {e}")
+    if feil and not rader:
+        logg.append("Aviasales: " + "; ".join(feil))
+        return "feil: " + feil[0]
+    funn["aviasales"] = travelpayouts.tolk(cfg, rader, gyldige, tidspunkt)
+    billigst = min((f["pris_per_person"] for f in funn["aviasales"].values()), default=None)
+    logg.append(f"Aviasales: {len(funn['aviasales'])} dato-kombinasjoner med pris"
+                + (f", billigst {kr(billigst)} p.p." if billigst else "")
+                + (f" ({len(feil)} delspørringer feilet)" if feil else ""))
+    return "ok" + (f", {len(feil)} feil" if feil else "")
 
 
-def sok_demo(cfg: dict, ut: date, hjem: date, api_key: str) -> dict:
-    data = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    # Varier prisen litt per dato så demo-rapporten ser realistisk ut.
-    justering = int(hashlib.sha1(nokkel(ut, hjem).encode()).hexdigest()[:4], 16) % 4000 - 1500
-    for gruppe in ("best_flights", "other_flights"):
-        for f in data.get(gruppe, []):
-            f["price"] = f["price"] + justering
-    data.setdefault("search_metadata", {})["google_flights_url"] = "https://www.google.com/travel/flights"
-    return data
+def kjor_restplass(cfg, demo, funn, tilstand, idag, tidspunkt, logg) -> str:
+    les = restplass.les_med_claude_demo if demo else restplass.les_med_claude
+    sidestatus = tilstand.setdefault("restplass", {})
+    ok = 0
+    for side in cfg["restplass_sider"]:
+        navn, url = side["navn"], side["url"]
+        forrige = sidestatus.get(navn, {})
+        try:
+            tekst = "Thailand Phuket demo" if demo else restplass.hent_sidetekst(url)
+        except Exception as e:
+            sidestatus[navn] = {**forrige, "status": f"kunne ikke åpne siden ({str(e)[:120]})", "tidspunkt": tidspunkt}
+            logg.append(f"{navn}: kunne ikke åpne siden ({str(e)[:120]})")
+            continue
+        if not restplass.nevner_thailand(tekst):
+            funn["restplass"][navn] = []
+            sidestatus[navn] = {"hash": "", "status": "ingen Thailand-tilbud på siden", "tidspunkt": tidspunkt}
+            logg.append(f"{navn}: siden nevner ikke Thailand nå.")
+            ok += 1
+            continue
+        h = restplass.tekst_hash(tekst)
+        if h == forrige.get("hash") and not demo:
+            sidestatus[navn] = {**forrige, "status": "uendret siden forrige kjøring", "tidspunkt": tidspunkt}
+            logg.append(f"{navn}: uendret, Claude ikke brukt.")
+            ok += 1
+            continue
+        try:
+            rader = les(cfg, navn, url, tekst, idag)
+        except Exception as e:
+            sidestatus[navn] = {**forrige, "status": f"Claude-feil ({str(e)[:120]})", "tidspunkt": tidspunkt}
+            logg.append(f"{navn}: Claude-feil ({str(e)[:120]})")
+            continue
+        tilbud = restplass.tolk(cfg, navn, url, rader, tidspunkt)
+        funn["restplass"][navn] = tilbud
+        sidestatus[navn] = {"hash": h, "status": f"{len(rader)} Thailand-tilbud, {len(tilbud)} passer kriteriene",
+                            "tidspunkt": tidspunkt}
+        logg.append(f"{navn}: {len(rader)} Thailand-tilbud lest, {len(tilbud)} passer kriteriene.")
+        ok += 1
+    return f"{ok} av {len(cfg['restplass_sider'])} sider lest"
 
 
-# ---------------------------------------------------------------- tolking
-
-def bagasje_status(alternativ: dict) -> str:
-    """'inkludert', 'ikke inkludert' eller 'ukjent' for innsjekket bagasje."""
-    tekster = list(alternativ.get("extensions", []))
-    for seg in alternativ.get("flights", []):
-        tekster += seg.get("extensions", [])
-    tekst = " ".join(tekster).lower()
-    if "checked bag" not in tekst and "checked baggage" not in tekst:
-        return "ukjent"
-    if any(o in tekst for o in ("for a fee", "not included", "checked baggage fee")):
-        return "ikke inkludert"
-    if any(o in tekst for o in ("free checked", "checked bag included", "checked baggage included")):
-        return "inkludert"
-    return "ukjent"
-
-
-def tolk_resultat(cfg: dict, data: dict, ut: date, hjem: date, tidspunkt: str) -> list[dict]:
-    """Gjør om SerpApi-svaret til en flat liste med reisealternativer."""
-    url = data.get("search_metadata", {}).get("google_flights_url", "")
-    bag_per_reise = 2 * cfg["estimert_innsjekket_bagasje_per_person_per_vei_nok"]
-    funn = []
-    for gruppe in ("best_flights", "other_flights"):
-        for alt in data.get(gruppe, []):
-            pris = alt.get("price")
-            segmenter = alt.get("flights", [])
-            if not pris or not segmenter:
-                continue
-            per_person = pris / cfg["voksne"] if cfg["pris_fra_api_er_totalt_for_alle"] else pris
-            bag = bagasje_status(alt)
-            funn.append({
-                "utreise": ut.isoformat(),
-                "hjemreise": hjem.isoformat(),
-                "netter": (hjem - ut).days,
-                "til": segmenter[-1].get("arrival_airport", {}).get("id", "?"),
-                "flyselskap": " / ".join(dict.fromkeys(s.get("airline", "?") for s in segmenter)),
-                "stopp": len(segmenter) - 1,
-                "via": ", ".join(l.get("id", "?") for l in alt.get("layovers", [])),
-                "reisetid_t": round(alt.get("total_duration", 0) / 60, 1),
-                "pris_totalt": round(pris),
-                "pris_per_person": round(per_person),
-                "bagasje": bag,
-                "pris_per_person_med_bag": round(per_person + (0 if bag == "inkludert" else bag_per_reise)),
-                "lenke": url,
-                "sjekket": tidspunkt,
-            })
-    return funn
+def kjor_google(cfg, api_key, demo, antall, funn, tilstand, kombinasjoner, tidspunkt, nå, logg) -> str:
+    sok = google_flights.sok_demo if demo else google_flights.sok
+    sjekket = tilstand["sjekket"]
+    grense = cfg["maks_pris_per_person_nok"] + cfg["nesten_treff_margin_nok"]
+    for_ett_dogn_siden = (nå - timedelta(days=1)).isoformat()
+    prioriterte = {n for n, f in funn["aviasales"].items()
+                   if f["pris_per_person"] <= grense and sjekket.get(n, "") < for_ett_dogn_siden}
+    neste = google_flights.velg_neste_sok(kombinasjoner, sjekket, antall, prioriterte)
+    utfort = 0
+    for ut, hjem in neste:
+        n = nokkel(ut, hjem)
+        grunn = " (bekrefter Aviasales-pris)" if n in prioriterte else ""
+        try:
+            data = sok(cfg, ut, hjem, api_key)
+        except KvoteFeil as e:
+            logg.append(f"Google Flights stoppet: kvote/nøkkel-feil ({e}).")
+            return "kvote brukt opp eller ugyldig nøkkel"
+        except Exception as e:
+            logg.append(f"Google Flights {ut} → {hjem}: feil ({e}). Prøves igjen senere.")
+            continue
+        utfort += 1
+        sjekket[n] = tidspunkt
+        alternativer = google_flights.tolk_resultat(cfg, data, ut, hjem, tidspunkt)
+        if not alternativer:
+            funn["google_flights"].pop(n, None)
+            logg.append(f"Google Flights {ut} → {hjem}: ingen flyvninger{grunn}.")
+            continue
+        billigst = min(alternativer, key=lambda f: f["pris_per_person"])
+        funn["google_flights"][n] = billigst
+        merke = " ✅ TREFF" if billigst["pris_per_person"] <= cfg["maks_pris_per_person_nok"] else ""
+        logg.append(f"Google Flights {ut} → {hjem}: {kr(billigst['pris_per_person'])} p.p. "
+                    f"til {billigst['til']} ({billigst['flyselskap']}){grunn}{merke}")
+    return f"ok, {utfort} søk"
 
 
 # ---------------------------------------------------------------- rapport
 
-def kr(belop: int) -> str:
-    return f"{belop:,}".replace(",", " ") + " kr"
+def kr(belop) -> str:
+    return f"{round(belop):,}".replace(",", " ") + " kr"
 
 
 def bag_tekst(f: dict) -> str:
@@ -215,33 +191,69 @@ def tabell(rader: list[dict]) -> str:
     if not rader:
         return "_Ingen._\n"
     linjer = [
-        "| Pris p.p. | Med innsj. bag p.p. | Utreise | Hjem | Netter | Til | Selskap | Stopp | Reisetid | Sjekket | |",
-        "|---:|---:|---|---|---:|---|---|---|---:|---|---|",
+        "| Pris p.p. | Med innsj. bag p.p. | Kilde | Type | Utreise | Hjem | Netter | Til | Selskap | Stopp | Sjekket | | Merknad |",
+        "|---:|---:|---|---|---|---|---:|---|---|---|---|---|---|",
     ]
     for f in rader:
-        stopp = f"{f['stopp']}" + (f" ({f['via']})" if f["via"] else "")
+        stopp = f"{f['stopp']}" + (f" ({f['via']})" if f.get("via") else "")
         linjer.append(
-            f"| **{kr(f['pris_per_person'])}** | {bag_tekst(f)} | {f['utreise']} | {f['hjemreise']} "
-            f"| {f['netter']} | {f['til']} | {f['flyselskap']} | {stopp} | {f['reisetid_t']} t "
-            f"| {f['sjekket'][:16].replace('T', ' ')} | [Se]({f['lenke']}) |"
+            f"| **{kr(f['pris_per_person'])}** | {bag_tekst(f)} | {f['kilde']} | {f['type']} "
+            f"| {f['utreise'] or '?'} | {f['hjemreise'] or '?'} | {f['netter']} | {f['til']} "
+            f"| {f['flyselskap']} | {stopp} | {f['sjekket'][:16].replace('T', ' ')} "
+            f"| [Se]({f['lenke']}) | {f.get('notat', '')} |"
         )
     return "\n".join(linjer) + "\n"
 
 
-def lag_rapport(cfg: dict, funn: dict, kombinasjoner, sjekket: dict, nå: datetime, logg: list[str]) -> str:
-    gyldige = {nokkel(*k) for k in kombinasjoner}
-    # Beste alternativ per dato-kombinasjon som fortsatt er aktuell
-    beste = [f for n, f in funn.items() if n in gyldige]
-    beste.sort(key=lambda f: f["pris_per_person"])
+def slaa_sammen_restplass(funn: dict) -> list[dict]:
+    """Samlesider (restplass.no, Travelmarket ...) viser ofte de samme tilbudene som
+    turoperatørene selv. Like tilbud slås sammen til én rad med alle kildene."""
+    unike: dict[tuple, dict] = {}
+    for liste in funn["restplass"].values():
+        for f in liste:
+            k = (f["til"].lower(), f["utreise"], f["hjemreise"], f["pris_per_person"], f["type"])
+            if k in unike:
+                if f["kilde"] not in unike[k]["kilde"]:
+                    unike[k]["kilde"] += f", {f['kilde']}"
+            else:
+                unike[k] = dict(f)
+    return list(unike.values())
+
+
+def alle_tilbud(funn: dict, idag: date) -> list[dict]:
+    rader = list(funn["google_flights"].values()) + list(funn["aviasales"].values())
+    rader += slaa_sammen_restplass(funn)
+    # Fjern tilbud med utreise som har passert
+    return [f for f in rader if not f["utreise"] or date.fromisoformat(f["utreise"]) > idag]
+
+
+def lag_rapport(cfg, funn, kombinasjoner, tilstand, kildestatus, nå, logg) -> str:
+    idag = nå.date()
+    alle = sorted(alle_tilbud(funn, idag), key=lambda f: f["pris_per_person"])
+    datert = [f for f in alle if f["utreise"] and f["hjemreise"]]
+    udatert = [f for f in alle if not (f["utreise"] and f["hjemreise"])]
+    restplass_alle = [f for f in alle if f["kilde"] not in ("Google Flights", "Aviasales")]
     maks = cfg["maks_pris_per_person_nok"]
     margin = cfg["nesten_treff_margin_nok"]
-    treff = [f for f in beste if f["pris_per_person"] <= maks]
-    nesten = [f for f in beste if maks < f["pris_per_person"] <= maks + margin]
+    treff = [f for f in datert if f["pris_per_person"] <= maks]
+    nesten = [f for f in datert if maks < f["pris_per_person"] <= maks + margin]
+    gyldige = {nokkel(*k) for k in kombinasjoner}
+    sjekket = tilstand["sjekket"]
     dekket = sum(1 for n in gyldige if n in sjekket)
-    siste_dogn = sum(1 for n in gyldige if sjekket.get(n, "") >= (nå - timedelta(days=1)).isoformat())
 
     status = (f"✅ **{len(treff)} treff** innenfor {kr(maks)} per person." if treff
               else f"Ingen treff under {kr(maks)} per person ennå.")
+    if udatert and any(f["pris_per_person"] <= maks for f in udatert):
+        status += " Det finnes også restplass-tilbud under makspris uten oppgitt dato – se egen seksjon."
+
+    kildelinjer = ["| Kilde | Status |", "|---|---|"]
+    kildelinjer += [f"| {k} | {s} |" for k, s in kildestatus.items()]
+    sidelinjer = ["| Side | Status | Sist sjekket |", "|---|---|---|"]
+    for side in cfg["restplass_sider"]:
+        s = tilstand.get("restplass", {}).get(side["navn"], {})
+        sidelinjer.append(f"| [{side['navn']}]({side['url']}) | {s.get('status', 'ikke sjekket')} "
+                          f"| {s.get('tidspunkt', '')[:16].replace('T', ' ')} |")
+
     deler = [
         "# Thailand-agenten – rapport",
         "",
@@ -249,39 +261,40 @@ def lag_rapport(cfg: dict, funn: dict, kombinasjoner, sjekket: dict, nå: dateti
         "",
         status,
         "",
-        "## Søkekriterier",
-        "",
-        f"- {cfg['voksne']} voksne, tur/retur fra {cfg['fra_flyplass']} til "
-        + ", ".join(f"{k} ({FLYPLASSER.get(k, k)})" for k in cfg["til_flyplasser"]),
-        f"- Utreise fra {cfg['tidligste_utreise']}, hjemme senest {cfg['seneste_hjemkomst']}, "
-        f"{cfg['min_netter']}–{cfg['maks_netter']} netter",
-        f"- Makspris {kr(maks)} per person (flybillett), maks {cfg['maks_stopp']} stopp",
-        f"- Dekning: {dekket} av {len(gyldige)} dato-kombinasjoner sjekket, "
-        f"{siste_dogn} siste døgn",
-        "",
         f"## Treff (≤ {kr(maks)} per person)",
         "",
         tabell(treff),
         f"## Nesten-treff ({kr(maks + 1)}–{kr(maks + margin)} per person)",
         "",
         tabell(nesten),
-        "## 10 billigste totalt",
+        "## Restplass og charter",
         "",
-        tabell(beste[:10]),
+        "Alle Thailand-tilbud fra restplass-sidene som passer reisevinduet, også uten oppgitt dato.",
+        "Pakkereiser inkluderer hotell, så prisen er ikke direkte sammenlignbar med kun fly.",
+        "",
+        tabell(restplass_alle[:20]),
+        "## 10 billigste totalt (med dato)",
+        "",
+        tabell(datert[:10]),
+        "## Kilder",
+        "",
+        *kildelinjer,
+        "",
+        f"Google Flights-dekning: {dekket} av {len(gyldige)} dato-kombinasjoner sjekket.",
+        "",
+        *sidelinjer,
+        "",
         "## Slik leser du rapporten",
         "",
-        "- **Pris p.p.** er flybillett per person med håndbagasje, hentet fra Google Flights.",
+        "- **Pris p.p.** er pris per person slik kilden oppgir den.",
+        "- **Google Flights** gir ferske priser. **Aviasales** gir bufrede priser fra de siste døgnene, "
+        "som kan være borte. Agenten bekrefter billige Aviasales-datoer i Google Flights automatisk.",
+        "- **Restplass-tilbud** er lest av Claude fra sidene. Merknaden viser om prisen er antatt per "
+        "person eller mangler dato. Sjekk alltid tilbudet på siden før du bestiller.",
         f"- **Med innsj. bag p.p.** legger til et *estimat* på "
-        f"{kr(cfg['estimert_innsjekket_bagasje_per_person_per_vei_nok'])} per person per vei "
-        "når bagasje ikke er inkludert eller ikke er oppgitt. Sjekk faktisk pris hos selskapet.",
-        "- Prisene er øyeblikksbilder. Sjekk «Sjekket»-tidspunktet. Lavpriser forsvinner raskt.",
-        "- Lenken åpner Google Flights-søket. Selve bestillingen gjør du hos flyselskap/byrå.",
-        "",
-        "## Restplasser og charter (sjekkes manuelt)",
-        "",
-        "Charterfly fra turoperatørene vises ikke i Google Flights. Sjekk restplass-sidene her:",
-        "",
-        *[f"- [{navn}]({url})" for navn, url in RESTPLASS_LENKER],
+        f"{kr(cfg['estimert_innsjekket_bagasje_per_person_per_vei_nok'])} per person per vei når bagasje "
+        "ikke er inkludert eller ikke er oppgitt.",
+        "- Prisene er øyeblikksbilder. Lavpriser forsvinner raskt.",
         "",
         "## Logg fra siste kjøring",
         "",
@@ -302,71 +315,68 @@ def kjor(args) -> int:
 
     nå = datetime.now(timezone.utc).replace(microsecond=0)
     tidspunkt = nå.isoformat()
-    tilstand = last_json(tilstand_sti, {"sjekket": {}})
+    tilstand = last_json(tilstand_sti, {})
+    tilstand.setdefault("sjekket", {})
     funn = last_json(funn_sti, {})
+    if "google_flights" not in funn:  # eldre format: bare Google Flights, nøklet på datoer
+        funn = {"google_flights": funn}
+    funn.setdefault("aviasales", {})
+    funn.setdefault("restplass", {})
 
     kombinasjoner = dato_kombinasjoner(cfg, nå.date())
-    logg = []
-    if not kombinasjoner:
-        logg.append("Reisevinduet er passert – ingen kombinasjoner igjen å søke på.")
+    gyldige = {nokkel(*k) for k in kombinasjoner}
     antall = args.antall or cfg["sok_per_kjoring"]
-    neste = velg_neste_sok(kombinasjoner, tilstand["sjekket"], antall)
 
     if args.dry_run:
-        print(f"{len(kombinasjoner)} kombinasjoner totalt. Neste {len(neste)} søk:")
+        neste = google_flights.velg_neste_sok(kombinasjoner, tilstand["sjekket"], antall)
+        print(f"{len(kombinasjoner)} kombinasjoner totalt. Neste {len(neste)} Google Flights-søk:")
         for ut, hjem in neste:
             print(f"  {ut} -> {hjem} ({(hjem - ut).days} netter)")
         return 0
 
-    if args.demo:
-        sok, api_key = sok_demo, ""
+    logg, kildestatus = [], {}
+    if not kombinasjoner:
+        logg.append("Reisevinduet er passert – ingen kombinasjoner igjen å søke på.")
+
+    tp_token = os.environ.get("TRAVELPAYOUTS_TOKEN", "")
+    if args.demo or tp_token:
+        kildestatus["Aviasales (Travelpayouts)"] = kjor_aviasales(
+            cfg, tp_token, args.demo, funn, gyldige, tidspunkt, logg)
     else:
-        api_key = os.environ.get("SERPAPI_KEY", "")
-        if not api_key:
-            print("Mangler SERPAPI_KEY. Bruk --demo for å teste uten nøkkel.", file=sys.stderr)
-            return 2
-        sok = sok_serpapi
+        kildestatus["Aviasales (Travelpayouts)"] = "av – mangler TRAVELPAYOUTS_TOKEN"
 
-    nye_rader = []
-    for ut, hjem in neste:
-        n = nokkel(ut, hjem)
-        try:
-            data = sok(cfg, ut, hjem, api_key)
-        except KvoteFeil as e:
-            logg.append(f"Stoppet: API-kvote/nøkkel-feil ({e}).")
-            break
-        except Exception as e:  # nettverk o.l. – prøv igjen neste kjøring
-            logg.append(f"{ut} → {hjem}: feil ({e}). Prøves igjen senere.")
-            continue
-        tilstand["sjekket"][n] = tidspunkt
-        alternativer = tolk_resultat(cfg, data, ut, hjem, tidspunkt)
-        if not alternativer:
-            funn.pop(n, None)
-            logg.append(f"{ut} → {hjem}: ingen flyvninger funnet.")
-            continue
-        billigst = min(alternativer, key=lambda f: f["pris_per_person"])
-        funn[n] = billigst
-        nye_rader.append(billigst)
-        merke = " ✅ TREFF" if billigst["pris_per_person"] <= cfg["maks_pris_per_person_nok"] else ""
-        logg.append(f"{ut} → {hjem}: billigst {kr(billigst['pris_per_person'])} p.p. "
-                    f"til {billigst['til']} ({billigst['flyselskap']}){merke}")
+    if args.demo or os.environ.get("ANTHROPIC_API_KEY"):
+        kildestatus["Restplass-sider (Claude)"] = kjor_restplass(
+            cfg, args.demo, funn, tilstand, nå.date(), tidspunkt, logg)
+    else:
+        kildestatus["Restplass-sider (Claude)"] = "av – mangler ANTHROPIC_API_KEY"
 
-    # Rydd bort datoer som ikke lenger er aktuelle
-    gyldige = {nokkel(*k) for k in kombinasjoner}
-    funn = {n: f for n, f in funn.items() if n in gyldige}
+    serp_key = os.environ.get("SERPAPI_KEY", "")
+    if (args.demo or serp_key) and kombinasjoner:
+        kildestatus["Google Flights (SerpApi)"] = kjor_google(
+            cfg, serp_key, args.demo, antall, funn, tilstand, kombinasjoner, tidspunkt, nå, logg)
+    elif not serp_key:
+        kildestatus["Google Flights (SerpApi)"] = "av – mangler SERPAPI_KEY"
+
+    # Rydd bort datoer og sider som ikke lenger er aktuelle
+    sider = {s["navn"] for s in cfg["restplass_sider"]}
+    funn["restplass"] = {n: l for n, l in funn["restplass"].items() if n in sider}
+    funn["google_flights"] = {n: f for n, f in funn["google_flights"].items() if n in gyldige}
+    funn["aviasales"] = {n: f for n, f in funn["aviasales"].items() if n in gyldige}
     tilstand["sjekket"] = {n: t for n, t in tilstand["sjekket"].items() if n in gyldige}
 
     lagre_json(tilstand_sti, tilstand)
     lagre_json(funn_sti, funn)
-    if nye_rader:
+    nye = [f for f in alle_tilbud(funn, nå.date()) if f["sjekket"] == tidspunkt]
+    if nye:
         ny_fil = not historikk_sti.exists()
         with historikk_sti.open("a", newline="", encoding="utf-8") as fil:
-            skriver = csv.DictWriter(fil, fieldnames=list(nye_rader[0].keys()))
+            skriver = csv.DictWriter(fil, fieldnames=HISTORIKK_FELT, extrasaction="ignore")
             if ny_fil:
                 skriver.writeheader()
-            skriver.writerows(nye_rader)
+            skriver.writerows(nye)
 
-    rapport = lag_rapport(cfg, funn, kombinasjoner, tilstand["sjekket"], nå, logg)
+    rapport = lag_rapport(cfg, funn, kombinasjoner, tilstand, kildestatus, nå, logg)
     Path(args.rapport).write_text(rapport, encoding="utf-8")
     print("\n".join(logg))
     print(f"Rapport skrevet til {args.rapport}")
@@ -375,9 +385,9 @@ def kjor(args) -> int:
 
 def main() -> int:
     p = argparse.ArgumentParser(description="Leter etter billige reiser Oslo–Thailand.")
-    p.add_argument("--demo", action="store_true", help="bruk testdata i stedet for SerpApi")
-    p.add_argument("--dry-run", action="store_true", help="vis neste søk uten å søke")
-    p.add_argument("--antall", type=int, help="antall søk denne kjøringen (overstyrer config)")
+    p.add_argument("--demo", action="store_true", help="bruk testdata i stedet for ekte kilder")
+    p.add_argument("--dry-run", action="store_true", help="vis neste Google Flights-søk uten å søke")
+    p.add_argument("--antall", type=int, help="antall Google Flights-søk (overstyrer config)")
     p.add_argument("--data-dir", default=str(ROOT / "data"))
     p.add_argument("--rapport", default=str(ROOT / "RAPPORT.md"))
     return kjor(p.parse_args())
