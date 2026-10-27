@@ -1,0 +1,38 @@
+{
+  "search_metadata": {"status": "Success", "google_flights_url": "https://www.google.com/travel/flights"},
+  "best_flights": [
+    {
+      "flights": [
+        {"departure_airport": {"id": "OSL"}, "arrival_airport": {"id": "DOH"}, "airline": "Qatar Airways", "flight_number": "QR 176"},
+        {"departure_airport": {"id": "DOH"}, "arrival_airport": {"id": "BKK"}, "airline": "Qatar Airways", "flight_number": "QR 832",
+         "extensions": ["Average legroom (79 cm)"]}
+      ],
+      "layovers": [{"id": "DOH", "duration": 125}],
+      "total_duration": 960,
+      "price": 11800,
+      "extensions": ["1 free checked bag"]
+    }
+  ],
+  "other_flights": [
+    {
+      "flights": [
+        {"departure_airport": {"id": "OSL"}, "arrival_airport": {"id": "IST"}, "airline": "Pegasus", "flight_number": "PC 1262"},
+        {"departure_airport": {"id": "SAW"}, "arrival_airport": {"id": "HKT"}, "airline": "Pegasus", "flight_number": "PC 3042"}
+      ],
+      "layovers": [{"id": "SAW", "duration": 300}],
+      "total_duration": 1150,
+      "price": 9200,
+      "extensions": ["Checked baggage for a fee"]
+    },
+    {
+      "flights": [
+        {"departure_airport": {"id": "OSL"}, "arrival_airport": {"id": "HEL"}, "airline": "Finnair", "flight_number": "AY 912"},
+        {"departure_airport": {"id": "HEL"}, "arrival_airport": {"id": "BKK"}, "airline": "Finnair", "flight_number": "AY 141"}
+      ],
+      "layovers": [{"id": "HEL", "duration": 90}],
+      "total_duration": 870,
+      "price": 10400
+    },
+    {"flights": [], "price": 100}
+  ]
+}

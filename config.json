@@ -1,0 +1,17 @@
+{
+  "_kommentar": "Alle søkekriterier for Thailand-agenten. Endre her, ikke i koden.",
+  "fra_flyplass": "OSL",
+  "til_flyplasser": ["BKK", "DMK", "HKT", "KBV", "USM"],
+  "voksne": 2,
+  "tidligste_utreise": "2026-11-24",
+  "seneste_hjemkomst": "2026-12-22",
+  "min_netter": 10,
+  "maks_netter": 21,
+  "maks_pris_per_person_nok": 5000,
+  "nesten_treff_margin_nok": 1000,
+  "maks_stopp": 2,
+  "pris_fra_api_er_totalt_for_alle": true,
+  "estimert_innsjekket_bagasje_per_person_per_vei_nok": 600,
+  "sok_per_kjoring": 2,
+  "valuta": "NOK"
+}
