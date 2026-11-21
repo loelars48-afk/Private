@@ -1,6 +1,6 @@
 # Thailand-agenten – rapport
 
-Sist oppdatert: 2026-11-20 15:34 UTC
+Sist oppdatert: 2026-11-21 00:01 UTC
 
 ## Kort fortalt
 
