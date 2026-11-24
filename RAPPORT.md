@@ -1,6 +1,6 @@
 # Thailand-agenten – rapport
 
-Sist oppdatert: 2026-11-23 18:21 UTC
+Sist oppdatert: 2026-11-24 17:53 UTC
 
 ## Kort fortalt
 
@@ -50,7 +50,7 @@ _Ingen._
 | Restplass-sider (Claude) | av – mangler ANTHROPIC_API_KEY |
 | Google Flights (SerpApi) | av – mangler SERPAPI_KEY |
 
-Google Flights-dekning: 0 av 150 dato-kombinasjoner sjekket.
+Google Flights-dekning: 0 av 138 dato-kombinasjoner sjekket.
 
 | Side | Status | Sist sjekket |
 |---|---|---|
